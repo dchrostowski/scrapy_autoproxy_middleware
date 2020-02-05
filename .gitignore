@@ -6,3 +6,4 @@ build/
 dist/
 *.egg-info/
 test_scheduler/
+scrapy_autoproxy/data/database

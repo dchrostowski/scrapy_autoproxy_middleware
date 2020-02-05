@@ -10,7 +10,7 @@ setup(
     name='scrapy_autoproxy',
     version='1.0.0',
     description='Machine learning proxy picker',
-    long_description=open('README.md').read(),
+    long_description=open('README.rst').read(),
     keywords='scrapy proxy web-scraping',
     license='MIT License',
     author="Dan Chrostowski",
@@ -20,9 +20,10 @@ setup(
         'scrapy_autoproxy',
     ],
     package_dir={'scrapy_autoproxy': 'scrapy_autoproxy'},
-    package_data={'scrapy_autoproxy': ['config/app_config.json','config/db_config.docker.json','config/redis_config.docker.json','config/redis_config.local.json','config/db_config.local.json']},
+    package_data={'scrapy_autoproxy/data': ['docker-compose.yml','.env','config/autoproxy.cfg','database/','init_sql/1-schema.sql','init_sql/2-seeds.sql']},
     install_requires=[
         'redis',
-        'psycopg2-binary'
+        'psycopg2-binary',
+        'docker'
     ],
 )
