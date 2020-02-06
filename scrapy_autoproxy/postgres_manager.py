@@ -12,12 +12,13 @@ logger = logging.getLogger(__name__)
 
 DB_CONNECT_INTERVAL = config.settings['db_connect_attempt_interval']
 MAX_DB_ATTEMPTS = config.settings['max_db_connect_attempts']
-SEED_QUEUE_ID = config.settings['seed_queue_id']
-AGGREGATE_QUEUE_ID = config.settings['aggregate_queue_id']
+SEED_QUEUE_ID = int(config.settings['seed_queue_id'])
+AGGREGATE_QUEUE_ID = int(config.settings['aggregate_queue_id'])
 SEED_QUEUE_DOMAIN = "RESERVED_SEED_QUEUE"
 AGGREGATE_QUEUE_DOMAIN = "RESERVED_AGGREGATE_QUEUE"
 PROXY_INTERVAL = int(config.settings['proxy_interval'])
 LAST_USED_CUTOFF = datetime.utcnow() - timedelta(seconds=PROXY_INTERVAL)
+INIT_RDQ_SIZE = config.settings['init_rdq_size']
 
 
 class PostgresManager(object):
@@ -67,12 +68,12 @@ class PostgresManager(object):
         if len(db_seed) == 0:
             self.insert_queue(seed_queue)
         elif db_seed[0]['queue_id'] != SEED_QUEUE_ID:
-            raise ReservedQueueMismatch("Unexpected seed queue id in database. Expecting %s, but got %s." % (SEED_QUEUE_ID, db_seed[0]['queue_id']))
+            raise ReservedQueueMismatchException("Unexpected seed queue id in database. Expecting '%s', but got '%s'." % (SEED_QUEUE_ID, db_seed[0]['queue_id']))
         
         if len(db_agg) == 0:
             self.insert_queue(agg_queue)
         elif(db_agg[0]['queue_id'] != AGGREGATE_QUEUE_ID):
-            raise ReservedQueueMismatch("Unexpected aggregate queue id in database. Expecting %s, but got %s." % (AGGREGATE_QUEUE_ID, agg_seed[0]['queue_id']))
+            raise ReservedQueueMismatchException("Unexpected aggregate queue id in database. Expecting '%s', but got '%s'." % (AGGREGATE_QUEUE_ID, agg_seed[0]['queue_id']))
 
         cursor = self.cursor()
         query = """
@@ -126,7 +127,6 @@ class PostgresManager(object):
         self.insert_object(proxy,'proxies','proxy_id',cursor)
 
     def get_queues(self):
-        self.init_seed_queues()
         return [Queue(**r) for r in self.do_query("SELECT * FROM queues;")]
         
     def get_proxies(self):
@@ -188,7 +188,7 @@ class PostgresManager(object):
         return pids
 
 
-    def get_queued_details(self,queue_id,active_limit=ACTIVE_LIMIT,inacive_limit=INACTIVE_LIMIT):
+    def get_queued_details(self,queue_id,limit=INIT_RDQ_SIZE):
         if queue_id is None:
             return []
         query= """
@@ -204,14 +204,13 @@ class PostgresManager(object):
             'queue_id': queue_id,
             'active': True,
             'last_used_cutoff': LAST_USED_CUTOFF,
-            'limit': active_limit
+            'limit': limit
         }
 
         active = [Detail(**d) for d in self.do_query(query, params)]
-        params['limit'] = inactive_limit
-
-        
+        params['actie'] = False
         inactive = [Detail(**d) for d in self.do_query(query, params)]
+
         return active + inactive
 
         
