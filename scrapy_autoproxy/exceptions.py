@@ -1,2 +1,2 @@
-class ReservedQueueMismatch(Exception):
+class ReservedQueueMismatchException(Exception):
     pass

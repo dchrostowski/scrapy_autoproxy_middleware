@@ -1,11 +1,14 @@
 
 from scrapy_autoproxy.config import config
 from scrapy_autoproxy.proxy_objects import Proxy,Detail,Queue
-from scrapy_autoproxy.exceptions import QueueMismatchException
+from scrapy_autoproxy.exceptions import ReservedQueueMismatchException
 import psycopg2
 from psycopg2.extras import DictCursor
 from psycopg2 import sql
 import time
+from datetime import datetime,timedelta
+import logging
+logger = logging.getLogger(__name__)
 
 DB_CONNECT_INTERVAL = config.settings['db_connect_attempt_interval']
 MAX_DB_ATTEMPTS = config.settings['max_db_connect_attempts']
@@ -13,7 +16,7 @@ SEED_QUEUE_ID = config.settings['seed_queue_id']
 AGGREGATE_QUEUE_ID = config.settings['aggregate_queue_id']
 SEED_QUEUE_DOMAIN = "RESERVED_SEED_QUEUE"
 AGGREGATE_QUEUE_DOMAIN = "RESERVED_AGGREGATE_QUEUE"
-PROXY_INTERVAL = config.settings['proxy_interval']
+PROXY_INTERVAL = int(config.settings['proxy_interval'])
 LAST_USED_CUTOFF = datetime.utcnow() - timedelta(seconds=PROXY_INTERVAL)
 
 
@@ -92,8 +95,6 @@ class PostgresManager(object):
                 raise Exception("cannot update detail without a detail id, queue id, or proxy id")
             where_sql = sql.SQL("{0}={1} AND {2}={3}").format(sql.Identifier('queue_id'),sql.Placeholder('queue_id'),sql.Identifier('proxy_id'),sql.Placeholder('proxy_id'))        
             
-            
-
         set_sql = sql.SQL(', ').join([sql.SQL("{0}={1}").format(sql.Identifier(k),sql.Placeholder(k)) for k in obj_dict.keys()])
         update = sql.SQL('UPDATE {0} SET {1} WHERE {2}').format(table_name,set_sql,where_sql)
         if cursor is not None:
@@ -124,16 +125,26 @@ class PostgresManager(object):
     def insert_proxy(self,proxy,cursor=None):
         self.insert_object(proxy,'proxies','proxy_id',cursor)
 
-    def init_seed_details(self):
-        seed_count = self.do_query("SELECT COUNT(*) as c FROM details WHERE queue_id=%(queue_id)s", {'queue_id':SEED_QUEUE_ID})[0]['c']
+    def get_queues(self):
+        self.init_seed_queues()
+        return [Queue(**r) for r in self.do_query("SELECT * FROM queues;")]
+        
+    def get_proxies(self):
+        return [Proxy(**p) for p in self.do_query("SELECT * FROM proxies")]
 
+    def init_seed_details(self):
+        logging.info("initializing seed details in the database...")
+
+        scq = "SELECT proxy_id FROM details WHERE queue_id=%(queue_id)s"
+        scqp = {'queue_id':SEED_QUEUE_ID}
+        pid_query = "SELECT proxy_id FROM proxies WHERE proxy_id NOT IN (%s)" % scq
         cursor = self.cursor()
-        if seed_count == 0:
-            proxy_ids = [p['proxy_id'] for p in self.do_query("SELECT proxy_id FROM proxies")]
-            for proxy_id in proxy_ids:
-                insert_detail = "INSERT INTO details (proxy_id,queue_id) VALUES (%(proxy_id)s, %(queue_id)s);"
-                params = {'proxy_id': proxy_id, 'queue_id': SEED_QUEUE_ID}
-                cursor.execute(insert_detail,params)
+
+        proxy_ids = [p['proxy_id'] for p in self.do_query(pid_query,scqp)]
+        for proxy_id in proxy_ids:
+            insert_detail = "INSERT INTO details (proxy_id,queue_id) VALUES (%(proxy_id)s, %(queue_id)s);"
+            params = {'proxy_id': proxy_id, 'queue_id': SEED_QUEUE_ID}
+            cursor.execute(insert_detail,params)
 
         
         query = """
@@ -146,49 +157,38 @@ class PostgresManager(object):
         cursor.execute(query)
         cursor.close()
 
+        logging.info("seed details initialized")
+
     def get_unused_proxy_ids(self,queue,count,excluded_pids):
         query = None
         excluded_pids.append(-1)
         excluded_pids.append(-2)
+
+        if queue.id() is not None:
+            exclude_query = "SELECT proxy_id FROM details WHERE queue_id = %(queue_id)s"
+            exclude_params = {'queue_id': queue.queue_id}
+            excluded_pids.extend([p[0] for p in self.do_query(exclude_query,exclude_params)])
+            
 
         params = {
             'seed_queue_id': SEED_QUEUE_ID,
             'limit': count,
             'excluded_pids': tuple(excluded_pids)
         }
-        
-        if queue.id() is None:
-            query = """
-                SELECT proxy_id FROM details 
-                WHERE queue_id = %(seed_queue_id)s
-                AND proxy_id NOT IN %(excluded_pids)s
-                ORDER BY RANDOM()
-                LIMIT %(limit)s
-                """
-            
-        else:
-            params['queue_id'] = queue.id()
-            query = """
-                SELECT proxy_id FROM details 
-                WHERE queue_id = %(seed_queue_id)s 
-                AND proxy_id NOT IN ( SELECT proxy_id FROM details WHERE queue_id = %(queue_id)s )
-                AND proxy_id NOT IN %(excluded_pids)s
-                ORDER BY RANDOM()
-                LIMIT %(limit)s
-                """
+
+        query = """
+            SELECT proxy_id FROM details 
+            WHERE queue_id = %(seed_queue_id)s
+            AND proxy_id NOT IN %(excluded_pids)s
+            ORDER BY RANDOM()
+            LIMIT %(limit)s
+            """
 
         pids = [pid[0] for pid in self.do_query(query,params)]
         return pids
 
-    def get_queues(self):
-        self.init_seed_queues()
-        return [Queue(**r) for r in self.do_query("SELECT * FROM queues;")]
-        
 
-    def get_proxies(self):
-        return [Proxy(**p) for p in self.do_query("SELECT * FROM proxies")]
-
-    def get_non_seed_details(self,queue_id):
+    def get_queued_details(self,queue_id,active_limit=ACTIVE_LIMIT,inacive_limit=INACTIVE_LIMIT):
         if queue_id is None:
             return []
         query= """
@@ -200,25 +200,18 @@ class PostgresManager(object):
             LIMIT %(limit)s;
             """
         
-        active_params = { 
+        params = { 
             'queue_id': queue_id,
             'active': True,
             'last_used_cutoff': LAST_USED_CUTOFF,
-            'limit': ACTIVE_LIMIT
+            'limit': active_limit
         }
 
-        inactive_params = {
-            'queue_id': queue_id,
-            'active': False,
-            'last_used_cutoff': LAST_USED_CUTOFF,
-            'limit': INACTIVE_LIMIT
-        }
+        active = [Detail(**d) for d in self.do_query(query, params)]
+        params['limit'] = inactive_limit
 
-        active = [Detail(**d) for d in self.do_query(query, active_params)]
         
-        inactive = [Detail(**d) for d in self.do_query(query, inactive_params)]
-
-
+        inactive = [Detail(**d) for d in self.do_query(query, params)]
         return active + inactive
 
         

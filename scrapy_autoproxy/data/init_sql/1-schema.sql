@@ -1,6 +1,4 @@
-CREATE SCHEMA IF NOT EXISTS autoproxy;
-
-CREATE TABLE IF NOT EXISTS autoproxy.proxies (
+CREATE TABLE proxies (
     "proxy_id" SERIAL PRIMARY KEY,
     "address" VARCHAR(40) NOT NULL,
     "port" INT NOT NULL,
@@ -8,13 +6,13 @@ CREATE TABLE IF NOT EXISTS autoproxy.proxies (
     CONSTRAINT address_port_unique UNIQUE("address","port")
 );
 
-CREATE TABLE IF NOT EXISTS autoproxy.queues (
+CREATE TABLE queues (
     "queue_id" SERIAL PRIMARY KEY,
     "domain" VARCHAR(100) NOT NULL,
     CONSTRAINT domain_unique UNIQUE("domain")
 );
 
-CREATE TABLE IF NOT EXISTS autoproxy.details (
+CREATE TABLE details (
     "detail_id" SERIAL PRIMARY KEY,
     "proxy_id" INTEGER REFERENCES proxies("proxy_id") NOT NULL,
     "queue_id" INTEGER REFERENCES queues("queue_id") NOT NULL,

@@ -65,6 +65,8 @@ class AutoproxyConfig(dict):
 config = AutoproxyConfig()
 
 if __name__ == "__main__":
+    print("name is main")
+    print(ENV_FILE)
     if os.path.isfile(ENV_FILE):
         config.write_to_env_file(ENV_FILE)
 
