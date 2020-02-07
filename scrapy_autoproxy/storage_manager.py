@@ -50,7 +50,6 @@ class StorageManager(object):
         logging.info("initial sync complete.")
 
 
-
     def check_sync(self):
         if len(self.redis.keys()) == 0:
             lock = self.redis.lock('syncing', thread_local=False)
@@ -94,7 +93,7 @@ class StorageManager(object):
                 continue
             detail_kwargs = {'proxy_id': proxy_id, 'proxy_key': proxy_key, 'queue_id': queue.id(), 'queue_key': queue.queue_key}
             new_detail = Detail(**detail_kwargs)
-            self.redis_mgr.redis.sadd(NEW_DETAILS_SET_KEY,new_detail)
+            self.redis_mgr.redis.sadd(NEW_DETAILS_SET_KEY,new_detail.detail_key)
             registered_detail = self.register_detail(new_detail,bypass_db_check=True,is_new=True)
 
     @block_if_syncing
@@ -123,6 +122,68 @@ class StorageManager(object):
             # return Detail(**self.redis.hgetall(detail_key))
         else:
             self.redis_mgr._register_detail(detail,is_new)
+
+    def get_queue_count(self,queue):
+        return self.redis_mgr.get_queue_count(queue)
+
+    def sync_to_db(self):
+        logging.info("STARTING SYNC")
+        new_queues = [Queue(**self.redis_mgr.redis.hgetall(q)) for q in self.redis_mgr.redis.keys("qt_*")]
+        new_proxies = [Proxy(**self.redis_mgr.redis.hgetall(p)) for p in self.redis_mgr.redis.keys("pt_*")]
+        new_detail_keys = set(self.redis_mgr.redis.keys('d_qt*') + self.redis_mgr.redis.keys('d_*pt*'))
+        for ndk in new_detail_keys:
+            self.redis_mgr.redis.sadd(NEW_DETAILS_SET_KEY, ndk)
+        
+        new_details = [Detail(**self.redis_mgr.redis.hgetall(d)) for d in list(new_detail_keys)]
+
+        cursor = self.db_mgr.cursor()
+
+        queue_keys_to_id = {}
+        proxy_keys_to_id = {}
+        for q in new_queues:
+            self.db_mgr.insert_queue(q,cursor)
+            queue_id = cursor.fetchone()[0]
+            queue_keys_to_id[q.queue_key] = queue_id
+
+        for p in new_proxies:
+            try:
+                self.db_mgr.insert_proxy(p,cursor)
+                proxy_id = cursor.fetchone()[0]
+                proxy_keys_to_id[p.proxy_key] = proxy_id
+            except psycopg2.errors.UniqueViolation as e:
+
+                # existing_proxy = self.db_mgr.get_proxy_by_address_and_port(p.address,p.port)
+                proxy_keys_to_id[p.proxy_key] = None
+
+
+        for d in new_details:
+            if d.proxy_id is None:
+                new_proxy_id = proxy_keys_to_id[d.proxy_key]
+                if new_proxy_id is None:
+
+                    continue
+                else:
+                    d.proxy_id = new_proxy_id
+            if d.queue_id is None:
+                d.queue_id = queue_keys_to_id[d.queue_key]
+            self.db_mgr.insert_detail(d,cursor)
+        
+
+        changed_detail_keys = self.redis_mgr.redis.sdiff('changed_details','new_details')      
+        changed_details = [Detail(**self.redis_mgr.redis.hgetall(d)) for d in self.redis_mgr.redis.sdiff('changed_details','new_details')]
+        
+        for changed in changed_details:
+            if(changed.queue_id is None or changed.proxy_id is None):
+                raise Exception("Unable to get a queue_id or proxy_id for an existing detail")
+            
+            self.db_mgr.update_detail(changed)
+            
+
+
+        cursor.close()
+        self.redis_mgr.redis.flushall()
+        logging.info("SYNC COMPLETE")
+        return True
             
 
 

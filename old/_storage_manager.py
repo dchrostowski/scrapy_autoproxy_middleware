@@ -17,6 +17,7 @@ from scrapy_autoproxy.proxy_objects import Proxy, Detail, Queue
 from scrapy_autoproxy.util import parse_domain
 import logging
 logger = logging.getLogger(__name__)
+import uuid
 
 from scrapy_autoproxy.config import configuration
 app_config = lambda config_val: configuration.app_config[config_val]['value']
@@ -383,6 +384,7 @@ class RedisDetailQueueInvalid(Exception):
 
 class RedisDetailQueue(object):
     def __init__(self,queue,active=True):
+        self.uuid = str(uuid.uuid4())
         self.redis_mgr = RedisManager()
 
         self.redis = self.redis_mgr.redis
@@ -703,7 +705,6 @@ class StorageManager(object):
     
     @queue_lock
     def create_new_details(self,queue,count=ACTIVE_LIMIT+INACTIVE_LIMIT):
-
         fetched_pids_key = "%s%s" % (NEW_QUEUE_PROXY_IDS_PREFIX,queue.domain)
         fetched_pids = list(self.redis_mgr.redis.smembers(fetched_pids_key))
         proxy_ids = self.db_mgr.get_unused_proxy_ids(queue,count,fetched_pids)

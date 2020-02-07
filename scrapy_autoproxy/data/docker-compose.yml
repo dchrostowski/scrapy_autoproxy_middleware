@@ -20,5 +20,5 @@ services:
       - ./init_sql:/docker-entrypoint-initdb.d
       - autoproxy_mw_pgdata:/var/lib/postgresql/data
 volumes:
-  autoproxy3_autoproxy_mw_pgdata:
+  autoproxy_mw_pgdata:
 

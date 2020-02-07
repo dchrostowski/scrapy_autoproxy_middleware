@@ -6,6 +6,7 @@ from scrapy_autoproxy.proxy_objects import Proxy, Detail, Queue
 import logging
 import datetime
 logger = logging.getLogger(__name__)
+import uuid
 
 
 
@@ -61,21 +62,35 @@ class RedisManager(object):
         return Proxy(**self.redis.hgetall(proxy_key))
 
     @block_if_syncing
-    def _register_detail(self,detail):
-        redis_deta = detail.to_dict(redis_format=True)
-        self.redis.hmset(detail_key,redis_data)
+    def _register_detail(self,detail,is_new=False):
+        redis_data = detail.to_dict(redis_format=True)
+        self.redis.hmset(detail.detail_key,redis_data)
 
-        if detail.proxy_id is None:
-            self.redis.sadd(NEW_DETAILS_SET_KEY, detail_key)
+        if is_new:
+            self.redis.sadd(NEW_DETAILS_SET_KEY, detail.detail_key)
         
         rdq = RedisDetailQueue(self.get_queue_by_key(detail.queue_key))
-        detail = Detail(**self.redis.hgetall(detail_key))
+        detail = Detail(**self.redis.hgetall(detail.detail_key))
         rdq.enqueue(detail)
         return detail
+    
+    @block_if_syncing
+    def get_detail(self,redis_detail_key):
+        return Detail(**self.redis.hgetall(redis_detail_key))
 
+    @block_if_syncing
+    def get_all_queues(self):
+        return [Queue(**self.redis.hgetall(q)) for q in self.redis.keys('q*')]
 
     def get_queue_by_key(self,queue_key):
         return Queue(**self.redis.hgetall(queue_key))
+    
+    def get_queue_by_domain(self,domain):
+        queue_dict = {q.domain: q for q in self.get_all_queues()}
+        if domain in queue_dict:
+            return queue_dict[domain]
+        
+        return self.register_queue(Queue(domain=domain))
 
     def get_proxy(self,proxy_key):
         return Proxy(**self.redis.hgetall(proxy_key))
@@ -109,7 +124,8 @@ class RedisManager(object):
         
 class RedisDetailQueue(object):
     def __init__(self,queue,active=False):
-        self.redis_mgr = RedisManager()
+        self.uuid = str(uuid.uuid4())
+        self.redis_mgr = RedisManager(uuid)
         self.redis = self.redis_mgr.redis
         self.queue = queue
         self.active = active

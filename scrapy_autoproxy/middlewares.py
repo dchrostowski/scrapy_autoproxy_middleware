@@ -16,7 +16,6 @@ import sys
 import logging
 import twisted
 import time
-
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -69,21 +68,32 @@ class AutoproxySpiderMiddleware(object):
         spider.logger.info('Spider opened: %s' % spider.name)
 
 
+
+
 class AutoproxyDownloaderMiddleware(object):
     # Not all methods need to be defined. If a method is not defined,
     # scrapy acts as if the downloader middleware does not modify the
     # passed objects.
 
-    def __init__(self,*args,**kwargs):
+    def __init__(self,crawler):
+        self.retry = crawler.settings.getbool('AUTOPROXY_RETRY',True)
+        self.retry_times = crawler.settings.getint('AUTOPROXY_RETRY_TIMES', 2)
+        default_neutral = crawler.settings.get('RETRY_HTTP_CODES',[]) + [404]
+        self.neutral_codes = crawler.settings.get('NEUTRAL_HTTP_CODES', default_neutral)
+        self.bad_codes = crawler.settings.get('BAD_HTTP_CODES',[400,401,402,403])
+        self.good_codes = crawler.settings.get('GOOD_HTTP_CODES', [200])
         
+
         self.proxy_mgr = ProxyManager()
-        logging.info(self.proxy_mgr.storage_mgr.redis_mgr)
-        self.exception_mgr = ExceptionManager()
+        
+        
+        
+        
 
     @classmethod
     def from_crawler(cls, crawler):
         # This method is used by Scrapy to create your spiders.
-        s = cls()
+        s = cls(crawler)
         crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
         return s
 
@@ -115,17 +125,52 @@ class AutoproxyDownloaderMiddleware(object):
         # - return a Response object
         # - return a Request object
         # - or raise IgnoreRequest
+
+
+        ## to do, use request.meta['download_latency']
         spider.logger.info("processing response for %s" % request.url)
-        proxy = request.meta['proxy_obj']
+        proxy = request.meta.get('proxy_obj',None)
 
+        
 
+        
+        if proxy:
 
-        if parse_domain(request.url) not in spider.allowed_domains and parse_domain(response.url) not in spider.allowed_domains:
-            logger.info("proxy redirected to a bad domain, marking bad")
-            proxy.callback(success=False)
-            return response
+            if parse_domain(request.url) not in spider.allowed_domains and parse_domain(response.url) not in spider.allowed_domains:
+                logger.info("proxy redirected to a bad domain, marking bad")
+                proxy.callback(success=False)
+                return response
 
-        proxy.callback(success=True)
+            
+            
+            if response.status in self.good_codes:
+                logging.info("Got an explicitly good response code, marking good")
+                proxy.callback(success=True)
+            
+            elif response.status in self.neutral_codes:
+                logging.info("Got an explicitly neutral response, marking success=None")
+                proxy.callback(success=None)
+
+            elif response.status in self.bad_codes:
+                logging.info("Got an explcitly bad response code, marking bad")
+                proxy.callback(success=False)
+
+            elif response.status >= 400:
+                logging.info("status code > 399, marking bad")
+                proxy.callback(success=False)
+            
+            elif response.status < 400:
+                logging.info("Got a status code < 400, marking good")
+                proxy.callback(success=True)
+            
+
+            else:
+                logging.warn("Got a weird edge case for an HTTP status code")
+                proxy.callback(success=None)
+
+            
+            
+        
         return response
 
     def process_exception(self, request, exception, spider):
@@ -138,20 +183,37 @@ class AutoproxyDownloaderMiddleware(object):
         # - return a Response object: stops process_exception() chain
         # - return a Request object: stops process_exception() chain
         spider.logger.info("processing exception for %s" % request.url)
-        logger.info(exception)
+        proxy = request.meta.get('proxy_obj',None)
+        
+        if proxy is not None:
+            if type(exception) is twisted.internet.error.TimeoutError:
+                proxy.callback(success=False)
+                logger.error("Request tmed out with proxy %s." % proxy.urlify())
+                if self.retry:
+                    retried = request.meta.get('autoproxy_tries',0) + 1
+                    
+                    if retried > self.retry_times:
+                        logging.error("url %s has exceeded max autoproxy retry attempts.  giving up..." % request.url)
+                        return None
+                    else:
+                        new_proxy = self.proxy_mgr.get_proxy(request.url)
+                        request.meta['proxy_obj'] = new_proxy
+                        request.meta['proxy'] = new_proxy.urlify()
+                        request.meta['autoproxy_tries'] = retried
+                        logging.error("Retrying request with a new proxy.")
+                        return request
+            
 
         if type(exception) == RedisDetailQueueEmpty:
             return None
-
-        
-        proxy = request.meta.get('proxy_obj',None)
 
         if proxy is None:
             logger.warn("no proxy object found in request.meta")
 
         proxy.callback(success=False)
-        return None
         
+        return None
+
 
     def spider_opened(self, spider):
         spider.logger.info('Spider opened: %s' % spider.name)

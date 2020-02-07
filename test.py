@@ -1,4 +1,4 @@
-from scrapy_autoproxy.storage_manager import StorageManager
+from scrapy_autoproxy.proxy_manager import ProxyManager
 import threading
 import time
 import logging
@@ -8,7 +8,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 from IPython import embed
 #ap = Autoproxy()
 
-sm = StorageManager()
+pm = ProxyManager()
 embed()
 """
 
