@@ -5,18 +5,20 @@ import logging
 import sys
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
-
 from IPython import embed
 #ap = Autoproxy()
 
+sm = StorageManager()
+embed()
+"""
 
 def init_sm1():
     sm1 = StorageManager()
-    sm1.redis_mgr.test_set_key('sm1','was here')
+    
 
 def init_sm2():
     sm2 = StorageManager()
-    sm2.redis_mgr.test_set_key('sm2','was here')
+    
 
 
 def daemon_fn():
@@ -26,9 +28,11 @@ def daemon_fn():
     time.sleep(5)
     print("starting sm2")
     thread2 = threading.Thread(name="sm2",target=init_sm2)
+    thread2.start()
+
+    
 
 daemon = threading.Thread(name='daemon', target=daemon_fn)
 daemon.setDaemon = True
 daemon.start()
-
-daemon.join()
+"""
