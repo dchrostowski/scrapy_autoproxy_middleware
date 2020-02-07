@@ -11,7 +11,7 @@ from functools import wraps
 from IPython import embed
 import uuid
 
-TEMP_ID_COUNTER = 0
+
 
 class StorageManager(object):
     def __init__(self):
