@@ -7,7 +7,6 @@ from datetime import datetime
 import random
 import re
 from urllib.parse import urlparse
-from IPython import embed
 
 
 logger = logging.getLogger(__name__)

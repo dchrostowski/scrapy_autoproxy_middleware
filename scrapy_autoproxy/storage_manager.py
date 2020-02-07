@@ -9,7 +9,6 @@ import traceback
 import logging
 logger = logging.getLogger(__name__)
 from functools import wraps
-from IPython import embed
 import uuid
 INIT_RDQ_SIZE = config.settings['init_rdq_size']
 NEW_QUEUE_PROXY_IDS_PREFIX = 'new_proxy_ids_'
