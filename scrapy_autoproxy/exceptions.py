@@ -3,3 +3,6 @@ class ReservedQueueMismatchException(Exception):
 
 class RedisDetailQueueEmptyException(Exception):
     pass
+
+class DetailExistsException(Exception):
+    pass

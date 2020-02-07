@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 TEMP_ID_COUNTER = 'temp_id_counter'
 MAX_BLACKLIST_COUNT = int(config.settings['max_blacklist_count'])
 BLACKLIST_TIME = int(config.settings['blacklist_time'])
+NEW_DETAILS_SET_KEY = 'new_details'
+CHANGED_DETAILS_SET_KEY = 'changed_details'
 
 
 
@@ -59,8 +61,18 @@ class RedisManager(object):
         return Proxy(**self.redis.hgetall(proxy_key))
 
     @block_if_syncing
-    def register_detail(self,detail):
-        pass
+    def _register_detail(self,detail):
+        redis_deta = detail.to_dict(redis_format=True)
+        self.redis.hmset(detail_key,redis_data)
+
+        if detail.proxy_id is None:
+            self.redis.sadd(NEW_DETAILS_SET_KEY, detail_key)
+        
+        rdq = RedisDetailQueue(self.get_queue_by_key(detail.queue_key))
+        detail = Detail(**self.redis.hgetall(detail_key))
+        rdq.enqueue(detail)
+        return detail
+
 
     def get_queue_by_key(self,queue_key):
         return Queue(**self.redis.hgetall(queue_key))

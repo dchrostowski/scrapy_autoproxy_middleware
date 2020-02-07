@@ -213,5 +213,18 @@ class PostgresManager(object):
 
         return active + inactive
 
+    def get_detail_by_queue_and_proxy(self,queue_id,proxy_id):
+        query = "SELECT * FROM details WHERE proxy_id=%(proxy_id)s AND queue_id=%(queue_id)s"
+        params = {'queue_id': queue_id, 'proxy_id':proxy_id}
+        cursor = self.cursor()
+        cursor.execute(query,params)
+        detail_data = cursor.fetchone()
+        if detail_data is None:
+            cursor.close()
+            return None
+        detail = Detail(**detail_data)
+        cursor.close()
+        return detail
+
         
         
